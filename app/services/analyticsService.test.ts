@@ -11,7 +11,12 @@ vi.mock("~/db", () => ({
   },
 }));
 
-import { getInstructorEarnings, getCourseDrillDown } from "./analyticsService";
+import {
+  getInstructorEarnings,
+  getCourseDrillDown,
+  getCourseCompletionRate,
+} from "./analyticsService";
+import { unenrollUser } from "./enrollmentService";
 
 function addPurchase(
   userId: number,
@@ -159,6 +164,105 @@ describe("analyticsService", () => {
     });
   });
 
+  describe("getCourseCompletionRate", () => {
+    function addStudent(email: string) {
+      return testDb
+        .insert(schema.users)
+        .values({ name: email, email, role: schema.UserRole.Student })
+        .returning()
+        .get();
+    }
+
+    function enroll(
+      userId: number,
+      courseId: number,
+      enrolledAt = "2026-11-02T09:00:00.000Z",
+      completedAt: string | null = null
+    ) {
+      testDb
+        .insert(schema.enrollments)
+        .values({ userId, courseId, enrolledAt, completedAt })
+        .run();
+    }
+
+    it("is completed enrollments divided by currently enrolled students", () => {
+      const students = ["r1", "r2", "r3", "r4"].map((n) =>
+        addStudent(`${n}@example.com`)
+      );
+      enroll(students[0].id, base.course.id, "2026-11-02T09:00:00.000Z", "2026-11-20T09:00:00.000Z");
+      enroll(students[1].id, base.course.id);
+      enroll(students[2].id, base.course.id);
+      enroll(students[3].id, base.course.id);
+      // Another course's completions must not count.
+      const otherCourse = testDb
+        .insert(schema.courses)
+        .values({
+          title: "Other Course",
+          slug: "other-course-rate",
+          description: "Someone else's course",
+          salesCopy: "## Other",
+          instructorId: base.instructor.id,
+          categoryId: base.category.id,
+          status: schema.CourseStatus.Published,
+        })
+        .returning()
+        .get();
+      enroll(students[0].id, otherCourse.id, "2026-11-02T09:00:00.000Z", "2026-11-20T09:00:00.000Z");
+
+      expect(getCourseCompletionRate(base.course.id, null, null)).toEqual({
+        completed: 1,
+        enrolled: 4,
+        rate: 0.25,
+      });
+    });
+
+    it("excludes unenrolled students from numerator and denominator", () => {
+      const a = addStudent("u-a@example.com");
+      const b = addStudent("u-b@example.com");
+      const c = addStudent("u-c@example.com");
+      enroll(a.id, base.course.id, "2026-11-02T09:00:00.000Z", "2026-11-10T09:00:00.000Z");
+      enroll(b.id, base.course.id);
+      enroll(c.id, base.course.id, "2026-11-02T09:00:00.000Z", "2026-11-11T09:00:00.000Z");
+
+      // c completed, then left the course.
+      unenrollUser(c.id, base.course.id);
+
+      expect(getCourseCompletionRate(base.course.id, null, null)).toEqual({
+        completed: 1,
+        enrolled: 2,
+        rate: 0.5,
+      });
+    });
+
+    it("returns zero, not an error, for a course with no enrollments", () => {
+      expect(getCourseCompletionRate(base.course.id, null, null)).toEqual({
+        completed: 0,
+        enrolled: 0,
+        rate: 0,
+      });
+    });
+
+    it("counts only enrollments made within the date range", () => {
+      const a = addStudent("d-a@example.com");
+      const b = addStudent("d-b@example.com");
+      const c = addStudent("d-c@example.com");
+      // In range and completed.
+      enroll(a.id, base.course.id, "2026-11-02T09:00:00.000Z", "2026-11-20T09:00:00.000Z");
+      // In range, not completed.
+      enroll(b.id, base.course.id, "2026-11-05T09:00:00.000Z");
+      // Enrolled before the range, completed — must not count.
+      enroll(c.id, base.course.id, "2026-09-01T09:00:00.000Z", "2026-09-10T09:00:00.000Z");
+
+      expect(
+        getCourseCompletionRate(
+          base.course.id,
+          "2026-10-15T00:00:00.000Z",
+          "2026-11-14T23:59:59.999Z"
+        )
+      ).toEqual({ completed: 1, enrolled: 2, rate: 0.5 });
+    });
+  });
+
   describe("getCourseDrillDown", () => {
     function addStudent(email: string) {
       return testDb
@@ -253,7 +357,31 @@ describe("analyticsService", () => {
         title: "Test Course",
         enrollmentCount: 0,
         rating: { average: null, count: 0 },
+        completionRate: { completed: 0, enrolled: 0, rate: 0 },
         weeklyEnrollments: [],
+      });
+    });
+
+    it("reports the completion rate for the course", () => {
+      const a = addStudent("cr-a@example.com");
+      const b = addStudent("cr-b@example.com");
+      addEnrollment(a.id, base.course.id, "2026-11-02T09:00:00.000Z");
+      testDb
+        .insert(schema.enrollments)
+        .values({
+          userId: b.id,
+          courseId: base.course.id,
+          enrolledAt: "2026-11-03T09:00:00.000Z",
+          completedAt: "2026-11-20T09:00:00.000Z",
+        })
+        .run();
+
+      const drillDown = getCourseDrillDown(base.instructor.id, base.course.id);
+
+      expect(drillDown?.completionRate).toEqual({
+        completed: 1,
+        enrolled: 2,
+        rate: 0.5,
       });
     });
   });

@@ -63,6 +63,48 @@ export function getInstructorEarnings(
   return { total, teamSales, direct: total - teamSales, byCourse };
 }
 
+// ─── Completion rate ───
+
+export type CourseCompletionRate = {
+  completed: number;
+  enrolled: number;
+  /** Completed divided by enrolled, as a fraction from 0 to 1. Zero when nobody is enrolled. */
+  rate: number;
+};
+
+/**
+ * Share of a course's currently enrolled students who have completed it.
+ * Unenrolling deletes the enrollment row, so those students drop out of both
+ * sides. `from`/`to` bound the enrollment date; null means all time.
+ */
+export function getCourseCompletionRate(
+  courseId: number,
+  from: string | null,
+  to: string | null
+): CourseCompletionRate {
+  const conditions: SQL[] = [eq(enrollments.courseId, courseId)];
+  if (from) conditions.push(gte(enrollments.enrolledAt, from));
+  if (to) conditions.push(lte(enrollments.enrolledAt, to));
+
+  const row = db
+    .select({
+      enrolled: sql<number>`count(*)`,
+      completed: sql<number>`count(${enrollments.completedAt})`,
+    })
+    .from(enrollments)
+    .where(and(...conditions))
+    .get();
+
+  const enrolled = row?.enrolled ?? 0;
+  const completed = row?.completed ?? 0;
+
+  return {
+    completed,
+    enrolled,
+    rate: enrolled === 0 ? 0 : completed / enrolled,
+  };
+}
+
 // ─── Course drill-down ───
 
 export type WeeklyEnrollment = {
@@ -76,6 +118,7 @@ export type CourseDrillDown = {
   title: string;
   enrollmentCount: number;
   rating: CourseRatingSummary;
+  completionRate: CourseCompletionRate;
   weeklyEnrollments: WeeklyEnrollment[];
 };
 
@@ -115,6 +158,7 @@ export function getCourseDrillDown(
     title: course.title,
     enrollmentCount: getEnrollmentCountForCourse(courseId),
     rating: getCourseRatingSummary(courseId),
+    completionRate: getCourseCompletionRate(courseId, null, null),
     weeklyEnrollments: weekly,
   };
 }

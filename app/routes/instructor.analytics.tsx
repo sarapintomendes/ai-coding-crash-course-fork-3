@@ -3,7 +3,10 @@ import type { Route } from "./+types/instructor.analytics";
 import { data, isRouteErrorResponse } from "react-router";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
-import { getInstructorEarnings } from "~/services/analyticsService";
+import {
+  getCourseCompletionRate,
+  getInstructorEarnings,
+} from "~/services/analyticsService";
 import { UserRole } from "~/db/schema";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
@@ -48,6 +51,20 @@ function resolveRange(url: URL) {
   };
 }
 
+// Returns inclusive bounds for the completion rate only when the dates are
+// explicitly given. Otherwise null, which means all time.
+function explicitBounds(url: URL) {
+  const pick = (name: string, suffix: string) => {
+    const value = url.searchParams.get(name);
+    return value && ISO_DATE.test(value) ? `${value}T${suffix}` : null;
+  };
+
+  return {
+    from: pick("from", "00:00:00.000Z"),
+    to: pick("to", "23:59:59.999Z"),
+  };
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   const currentUserId = await getCurrentUserId(request);
 
@@ -65,14 +82,37 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
-  const range = resolveRange(new URL(request.url));
+  const url = new URL(request.url);
+  const range = resolveRange(url);
   const earnings = getInstructorEarnings(
     currentUserId,
     range.fromBound,
     range.toBound
   );
 
-  return { range: { from: range.from, to: range.to }, earnings };
+  // Completion rate filters by enrollment date and defaults to all time, so it
+  // only uses dates that are explicitly in the URL.
+  const explicit = explicitBounds(url);
+  const byCourse = earnings.byCourse.map((course) => ({
+    ...course,
+    completion: getCourseCompletionRate(
+      course.courseId,
+      explicit.from,
+      explicit.to
+    ),
+  }));
+
+  return {
+    range: { from: range.from, to: range.to },
+    earnings: { ...earnings, byCourse },
+  };
+}
+
+// Shown as a percentage of enrolled students who completed the course.
+// Courses with nobody enrolled show 0%.
+function formatCompletion(completion: { rate: number; enrolled: number }) {
+  if (completion.enrolled === 0) return "0%";
+  return `${Math.round(completion.rate * 100)}%`;
 }
 
 export default function InstructorAnalytics({
@@ -153,6 +193,7 @@ export default function InstructorAnalytics({
                   <th className="py-2 text-right">Total</th>
                   <th className="py-2 text-right">Direct</th>
                   <th className="py-2 text-right">Team / coupon</th>
+                  <th className="py-2 text-right">Completion</th>
                 </tr>
               </thead>
               <tbody>
@@ -169,6 +210,9 @@ export default function InstructorAnalytics({
                     <td className="py-2 text-right">{formatPrice(course.total)}</td>
                     <td className="py-2 text-right">{formatPrice(course.direct)}</td>
                     <td className="py-2 text-right">{formatPrice(course.teamSales)}</td>
+                    <td className="py-2 text-right">
+                      {formatCompletion(course.completion)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

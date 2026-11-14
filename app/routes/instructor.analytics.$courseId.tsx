@@ -67,13 +67,28 @@ export default function InstructorCourseAnalytics({
         <h1 className="mt-2 text-2xl font-bold">{course.title}</h1>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader>
             <h2 className="text-sm font-medium text-muted-foreground">Enrollments</h2>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">{course.enrollmentCount}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <h2 className="text-sm font-medium text-muted-foreground">Completion rate</h2>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">
+              {course.completionRate.enrolled === 0
+                ? "0%"
+                : `${Math.round(course.completionRate.rate * 100)}%`}{" "}
+              <span className="text-sm font-normal text-muted-foreground">
+                {course.completionRate.completed} of {course.completionRate.enrolled} completed
+              </span>
+            </p>
           </CardContent>
         </Card>
         <Card>
