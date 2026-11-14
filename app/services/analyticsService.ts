@@ -1,6 +1,11 @@
 import { and, asc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "~/db";
-import { coupons, courses, purchases } from "~/db/schema";
+import { coupons, courses, enrollments, purchases } from "~/db/schema";
+import { getEnrollmentCountForCourse } from "~/services/enrollmentService";
+import {
+  getCourseRatingSummary,
+  type CourseRatingSummary,
+} from "~/services/courseRatingService";
 
 // ─── Analytics Service ───
 // Instructor-facing analytics: earnings, completion, drop-off.
@@ -56,4 +61,60 @@ export function getInstructorEarnings(
   const teamSales = byCourse.reduce((sum, c) => sum + c.teamSales, 0);
 
   return { total, teamSales, direct: total - teamSales, byCourse };
+}
+
+// ─── Course drill-down ───
+
+export type WeeklyEnrollment = {
+  /** The Monday that starts the week, as YYYY-MM-DD. */
+  weekStart: string;
+  count: number;
+};
+
+export type CourseDrillDown = {
+  courseId: number;
+  title: string;
+  enrollmentCount: number;
+  rating: CourseRatingSummary;
+  weeklyEnrollments: WeeklyEnrollment[];
+};
+
+/**
+ * One course's own view for its instructor. Returns null when the course doesn't
+ * exist or belongs to someone else, so callers can refuse both the same way.
+ */
+export function getCourseDrillDown(
+  instructorId: number,
+  courseId: number
+): CourseDrillDown | null {
+  const course = db
+    .select({ id: courses.id, title: courses.title })
+    .from(courses)
+    .where(and(eq(courses.id, courseId), eq(courses.instructorId, instructorId)))
+    .get();
+
+  if (!course) return null;
+
+  // 'weekday 0' moves to the next Sunday (or stays on it), and '-6 days' then
+  // lands on the Monday of that Monday-to-Sunday week.
+  const weekStart = sql<string>`date(${enrollments.enrolledAt}, 'weekday 0', '-6 days')`;
+
+  const weekly = db
+    .select({
+      weekStart,
+      count: sql<number>`count(*)`,
+    })
+    .from(enrollments)
+    .where(eq(enrollments.courseId, courseId))
+    .groupBy(weekStart)
+    .orderBy(asc(weekStart))
+    .all();
+
+  return {
+    courseId: course.id,
+    title: course.title,
+    enrollmentCount: getEnrollmentCountForCourse(courseId),
+    rating: getCourseRatingSummary(courseId),
+    weeklyEnrollments: weekly,
+  };
 }

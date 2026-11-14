@@ -11,7 +11,7 @@ vi.mock("~/db", () => ({
   },
 }));
 
-import { getInstructorEarnings } from "./analyticsService";
+import { getInstructorEarnings, getCourseDrillDown } from "./analyticsService";
 
 function addPurchase(
   userId: number,
@@ -156,6 +156,105 @@ describe("analyticsService", () => {
       expect(earnings.total).toBe(0);
       expect(earnings.teamSales).toBe(0);
       expect(earnings.direct).toBe(0);
+    });
+  });
+
+  describe("getCourseDrillDown", () => {
+    function addStudent(email: string) {
+      return testDb
+        .insert(schema.users)
+        .values({ name: email, email, role: schema.UserRole.Student })
+        .returning()
+        .get();
+    }
+
+    function addEnrollment(userId: number, courseId: number, enrolledAt: string) {
+      testDb
+        .insert(schema.enrollments)
+        .values({ userId, courseId, enrolledAt })
+        .run();
+    }
+
+    it("returns null for a course owned by another instructor", () => {
+      const otherInstructor = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other Instructor",
+          email: "other-instructor@example.com",
+          role: schema.UserRole.Instructor,
+        })
+        .returning()
+        .get();
+
+      const drillDown = getCourseDrillDown(
+        otherInstructor.id,
+        base.course.id
+      );
+
+      expect(drillDown).toBeNull();
+    });
+
+    it("counts new enrollments per week, Monday to Sunday, for this course only", () => {
+      const a = addStudent("a@example.com");
+      const b = addStudent("b@example.com");
+      const c = addStudent("c@example.com");
+
+      // 2026-11-02 is a Monday; 2026-11-08 is the Sunday of the same week.
+      addEnrollment(a.id, base.course.id, "2026-11-02T09:00:00.000Z");
+      addEnrollment(b.id, base.course.id, "2026-11-08T23:00:00.000Z");
+      // The following Monday starts a new week.
+      addEnrollment(c.id, base.course.id, "2026-11-09T08:00:00.000Z");
+      // Another course's enrollments must not leak in.
+      const otherCourse = testDb
+        .insert(schema.courses)
+        .values({
+          title: "Other Course",
+          slug: "other-course-drill",
+          description: "Someone else's course",
+          salesCopy: "## Other",
+          instructorId: base.instructor.id,
+          categoryId: base.category.id,
+          status: schema.CourseStatus.Published,
+        })
+        .returning()
+        .get();
+      addEnrollment(a.id, otherCourse.id, "2026-11-03T09:00:00.000Z");
+
+      const drillDown = getCourseDrillDown(base.instructor.id, base.course.id);
+
+      expect(drillDown?.enrollmentCount).toBe(3);
+      expect(drillDown?.weeklyEnrollments).toEqual([
+        { weekStart: "2026-11-02", count: 2 },
+        { weekStart: "2026-11-09", count: 1 },
+      ]);
+    });
+
+    it("reports the average rating and the number of ratings", () => {
+      const a = addStudent("rate-a@example.com");
+      const b = addStudent("rate-b@example.com");
+      testDb
+        .insert(schema.courseRatings)
+        .values([
+          { userId: a.id, courseId: base.course.id, rating: 4 },
+          { userId: b.id, courseId: base.course.id, rating: 5 },
+        ])
+        .run();
+
+      const drillDown = getCourseDrillDown(base.instructor.id, base.course.id);
+
+      expect(drillDown?.rating).toEqual({ average: 4.5, count: 2 });
+    });
+
+    it("returns an empty state when the course has no ratings or enrollments", () => {
+      const drillDown = getCourseDrillDown(base.instructor.id, base.course.id);
+
+      expect(drillDown).toEqual({
+        courseId: base.course.id,
+        title: "Test Course",
+        enrollmentCount: 0,
+        rating: { average: null, count: 0 },
+        weeklyEnrollments: [],
+      });
     });
   });
 });

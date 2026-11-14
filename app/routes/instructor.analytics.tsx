@@ -1,4 +1,4 @@
-import { Form } from "react-router";
+import { Form, Link } from "react-router";
 import type { Route } from "./+types/instructor.analytics";
 import { data, isRouteErrorResponse } from "react-router";
 import { getCurrentUserId } from "~/lib/session";
@@ -158,7 +158,14 @@ export default function InstructorAnalytics({
               <tbody>
                 {earnings.byCourse.map((course) => (
                   <tr key={course.courseId} className="border-b">
-                    <td className="py-2">{course.title}</td>
+                    <td className="py-2">
+                      <Link
+                        to={`/instructor/analytics/${course.courseId}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {course.title}
+                      </Link>
+                    </td>
                     <td className="py-2 text-right">{formatPrice(course.total)}</td>
                     <td className="py-2 text-right">{formatPrice(course.direct)}</td>
                     <td className="py-2 text-right">{formatPrice(course.teamSales)}</td>
