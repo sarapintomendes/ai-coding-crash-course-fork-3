@@ -11,7 +11,7 @@ export type CourseEarnings = {
   courseId: number;
   title: string;
   total: number;
-  team: number;
+  teamSales: number;
   direct: number;
 };
 
@@ -35,7 +35,7 @@ export function getInstructorEarnings(
       courseId: courses.id,
       title: courses.title,
       total: sql<number>`coalesce(sum(${purchases.amountPaid}), 0)`,
-      team: sql<number>`coalesce(sum(case when ${isTeamSale} then ${purchases.amountPaid} else 0 end), 0)`,
+      teamSales: sql<number>`coalesce(sum(case when ${isTeamSale} then ${purchases.amountPaid} else 0 end), 0)`,
     })
     .from(courses)
     .leftJoin(purchases, and(...purchaseConditions))
@@ -48,12 +48,12 @@ export function getInstructorEarnings(
     courseId: row.courseId,
     title: row.title,
     total: row.total,
-    team: row.team,
-    direct: row.total - row.team,
+    teamSales: row.teamSales,
+    direct: row.total - row.teamSales,
   }));
 
   const total = byCourse.reduce((sum, c) => sum + c.total, 0);
-  const team = byCourse.reduce((sum, c) => sum + c.team, 0);
+  const teamSales = byCourse.reduce((sum, c) => sum + c.teamSales, 0);
 
-  return { total, team, direct: total - team, byCourse };
+  return { total, teamSales, direct: total - teamSales, byCourse };
 }

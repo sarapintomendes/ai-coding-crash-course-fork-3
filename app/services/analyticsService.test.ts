@@ -59,7 +59,7 @@ describe("analyticsService", () => {
       addPurchase(base.user.id, base.course.id, 4000);
       const teamPurchase = addPurchase(base.user.id, base.course.id, 7500);
 
-      const team = testDb
+      const teamSales = testDb
         .insert(schema.teams)
         .values({})
         .returning()
@@ -67,7 +67,7 @@ describe("analyticsService", () => {
       testDb
         .insert(schema.coupons)
         .values({
-          teamId: team.id,
+          teamId: teamSales.id,
           courseId: base.course.id,
           code: "TEAM-SPLIT-1",
           purchaseId: teamPurchase.id,
@@ -77,7 +77,7 @@ describe("analyticsService", () => {
       const earnings = getInstructorEarnings(base.instructor.id, null, null);
 
       expect(earnings.direct).toBe(4000);
-      expect(earnings.team).toBe(7500);
+      expect(earnings.teamSales).toBe(7500);
       expect(earnings.total).toBe(11500);
     });
 
@@ -137,14 +137,14 @@ describe("analyticsService", () => {
           courseId: base.course.id,
           title: "Test Course",
           total: 4000,
-          team: 0,
+          teamSales: 0,
           direct: 4000,
         },
         {
           courseId: quietCourse.id,
           title: "Quiet Course",
           total: 0,
-          team: 0,
+          teamSales: 0,
           direct: 0,
         },
       ]);
@@ -154,7 +154,7 @@ describe("analyticsService", () => {
       const earnings = getInstructorEarnings(base.instructor.id, null, null);
 
       expect(earnings.total).toBe(0);
-      expect(earnings.team).toBe(0);
+      expect(earnings.teamSales).toBe(0);
       expect(earnings.direct).toBe(0);
     });
   });

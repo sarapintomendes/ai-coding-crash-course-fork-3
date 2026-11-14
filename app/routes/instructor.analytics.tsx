@@ -17,7 +17,9 @@ export function meta() {
   ];
 }
 
-const DEFAULT_RANGE_DAYS = 30;
+// "Last 30 days" includes today, so the window starts 29 days back.
+const DEFAULT_RANGE_DAYS = 29;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isoDate(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -25,13 +27,18 @@ function isoDate(date: Date) {
 
 // The range is a pair of calendar dates from the query string. The loader turns
 // them into inclusive day bounds so a purchase on the final day is counted.
+// A missing or malformed date falls back to the default rather than silently
+// returning zeros.
 function resolveRange(url: URL) {
   const today = new Date();
   const defaultFrom = new Date(today);
   defaultFrom.setUTCDate(defaultFrom.getUTCDate() - DEFAULT_RANGE_DAYS);
 
-  const from = url.searchParams.get("from") || isoDate(defaultFrom);
-  const to = url.searchParams.get("to") || isoDate(today);
+  const parse = (value: string | null, fallback: string) =>
+    value && ISO_DATE.test(value) ? value : fallback;
+
+  const from = parse(url.searchParams.get("from"), isoDate(defaultFrom));
+  const to = parse(url.searchParams.get("to"), isoDate(today));
 
   return {
     from,
@@ -126,7 +133,7 @@ export default function InstructorAnalytics({
             <h2 className="text-sm font-medium text-muted-foreground">Team / coupon sales</h2>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatPrice(earnings.team)}</p>
+            <p className="text-2xl font-bold">{formatPrice(earnings.teamSales)}</p>
           </CardContent>
         </Card>
       </div>
@@ -154,7 +161,7 @@ export default function InstructorAnalytics({
                     <td className="py-2">{course.title}</td>
                     <td className="py-2 text-right">{formatPrice(course.total)}</td>
                     <td className="py-2 text-right">{formatPrice(course.direct)}</td>
-                    <td className="py-2 text-right">{formatPrice(course.team)}</td>
+                    <td className="py-2 text-right">{formatPrice(course.teamSales)}</td>
                   </tr>
                 ))}
               </tbody>
